@@ -1022,7 +1022,9 @@ class Controller(object):
             event = self.last_event
         if event is None:
             raise RuntimeError("No event is available; initialize the controller first")
-        return event.environment_graph(include_close_edges=include_close_edges)
+        from ai2thor.util.environment_graph import environment_graph
+
+        return environment_graph(event, include_close_edges=include_close_edges)
 
     def step(self, action: Union[str, Dict[str, Any]] = None, **action_args):
         if isinstance(action, Dict):
