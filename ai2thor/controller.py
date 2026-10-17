@@ -1012,6 +1012,18 @@ class Controller(object):
             return True
         return False
 
+    def get_environment_graph(self, event=None, include_close_edges=True):
+        """Return a VirtualHome-style environment graph for an event snapshot.
+
+        If ``event`` is omitted, the graph is built from ``last_event``. This is
+        a local metadata conversion and does not send an action to Unity.
+        """
+        if event is None:
+            event = self.last_event
+        if event is None:
+            raise RuntimeError("No event is available; initialize the controller first")
+        return event.environment_graph(include_close_edges=include_close_edges)
+
     def step(self, action: Union[str, Dict[str, Any]] = None, **action_args):
         if isinstance(action, Dict):
             # We attempt to prevent changes from leaking, doing a deep copy

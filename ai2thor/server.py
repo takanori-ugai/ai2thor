@@ -470,6 +470,12 @@ class Event:
     def __bool__(self):
         return self.metadata["lastActionSuccess"]
 
+    def environment_graph(self, include_close_edges=True):
+        """Return this event's scene as a VirtualHome-style nodes/edges graph."""
+        from ai2thor.util.environment_graph import environment_graph
+
+        return environment_graph(self, include_close_edges=include_close_edges)
+
     def __repr__(self):
         """Summarizes the results from an Event."""
         action_return = str(self.metadata["actionReturn"])
