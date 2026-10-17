@@ -343,6 +343,12 @@ class MultiAgentEvent(object):
     def __bool__(self):
         return bool(self._active_event)
 
+    def environment_graph(self, include_close_edges=True):
+        """Return a VirtualHome-style graph from the active agent's metadata."""
+        from ai2thor.util.environment_graph import environment_graph
+
+        return environment_graph(self, include_close_edges=include_close_edges)
+
     @property
     def cv2img(self):
         return self._active_event.cv2img
