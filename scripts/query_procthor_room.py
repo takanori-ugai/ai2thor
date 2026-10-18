@@ -41,7 +41,9 @@ def _point_in_polygon(x: float, z: float, polygon: list[dict[str, Any]]) -> bool
 
 def _room_contains(room: dict[str, Any], position: dict[str, Any]) -> bool:
     try:
-        return _point_in_polygon(float(position["x"]), float(position["z"]), room.get("floorPolygon", []))
+        return _point_in_polygon(
+            float(position["x"]), float(position["z"]), room.get("floorPolygon", [])
+        )
     except (KeyError, TypeError, ValueError):
         return False
 
@@ -158,9 +160,13 @@ def choose_room(query: str, candidates: list[dict[str, Any]], model: str) -> dic
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--query", required=True, help="Natural-language room description (Japanese or English).")
+    parser.add_argument(
+        "--query", required=True, help="Natural-language room description (Japanese or English)."
+    )
     parser.add_argument("--split", default="train", help="ProcTHOR-10K split (default: train).")
-    parser.add_argument("--index", type=int, default=0, help="Zero-based house index in the split (default: 0).")
+    parser.add_argument(
+        "--index", type=int, default=0, help="Zero-based house index in the split (default: 0)."
+    )
     parser.add_argument("--model", default="gpt-6-luna", help="OpenAI model (default: gpt-6-luna).")
     args = parser.parse_args()
 

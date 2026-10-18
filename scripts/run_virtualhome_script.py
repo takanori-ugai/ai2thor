@@ -250,14 +250,11 @@ def load_procthor_house(split: str, index: int) -> dict:
         dataset = prior.load_dataset("procthor-10k")
         houses = dataset[split]
     except Exception as exc:
-        raise RuntimeError(
-            f"could not load ProcTHOR-10K split {split!r}: {exc}"
-        ) from exc
+        raise RuntimeError(f"could not load ProcTHOR-10K split {split!r}: {exc}") from exc
 
     if index < 0 or index >= len(houses):
         raise ValueError(
-            f"ProcTHOR-10K {split!r} index must be between 0 and {len(houses) - 1}; "
-            f"got {index}"
+            f"ProcTHOR-10K {split!r} index must be between 0 and {len(houses) - 1}; " f"got {index}"
         )
     house = houses[index]
     # Some prior versions expose a House object, while the dataset's current
@@ -301,9 +298,7 @@ class VirtualHomeRunner:
             )
         # VirtualHome may use 0 as an unresolved ID; resolve it from the class name.
         # Otherwise prefer an explicit AI2-THOR objectId before matching objectType.
-        by_id = [] if identifier == "0" else [
-            o for o in objects if o.get("objectId") == identifier
-        ]
+        by_id = [] if identifier == "0" else [o for o in objects if o.get("objectId") == identifier]
         if by_id:
             return by_id[0]
         accepted_types = TYPE_ALIASES.get(normalize_type(name), {normalize_type(name)})
@@ -612,9 +607,7 @@ def main() -> int:
             scene = load_procthor_house(args.procthor_split, args.procthor_index)
         except (RuntimeError, TypeError, ValueError) as exc:
             parser.error(str(exc))
-        print(
-            f"Loaded ProcTHOR-10K {args.procthor_split}[{args.procthor_index}]"
-        )
+        print(f"Loaded ProcTHOR-10K {args.procthor_split}[{args.procthor_index}]")
 
     controller = ai2thor.controller.Controller(
         scene=scene,
@@ -624,55 +617,56 @@ def main() -> int:
         commit_id=args.commit_id,
         platform=ai2thor.platform.Linux64,
     )
-    recorder = (
-        FrameRecorder(args.video_out, args.video_fps, show_window=args.show_camera)
-        if args.video_out
-        else None
-    )
-    controller_step = controller.step
-
-    if recorder is not None:
-        def update_follow_camera(event):
-            inventory = event.metadata.get("inventoryObjects", [])
-            held_pose = event.metadata.get("heldObjectPose", {})
-            focus = held_pose.get("position") if inventory else None
-            camera_position, camera_rotation = rear_camera_pose(
-                event.metadata["agent"], offset, focus
-            )
-            cameras = event.metadata.get("thirdPartyCameras", [])
-            if cameras:
-                camera_event = controller_step(
-                    action="UpdateThirdPartyCamera",
-                    thirdPartyCameraId=0,
-                    position=camera_position,
-                    rotation=camera_rotation,
-                )
-            else:
-                camera_event = controller_step(
-                    action="AddThirdPartyCamera",
-                    position=camera_position,
-                    rotation=camera_rotation,
-                )
-            recorder.append(FrameRecorder.frame_from_event(camera_event, "follow"))
-
-        if not args.headless:
-            if args.camera_view == "follow":
-                update_follow_camera(controller.last_event)
-            else:
-                recorder.append(
-                    FrameRecorder.frame_from_event(controller.last_event, "agent")
-                )
-
-            def recording_step(*step_args, **step_kwargs):
-                event = controller_step(*step_args, **step_kwargs)
-                if args.camera_view == "follow":
-                    update_follow_camera(event)
-                else:
-                    recorder.append(FrameRecorder.frame_from_event(event, "agent"))
-                return event
-
-            controller.step = recording_step
+    recorder = None
     try:
+        recorder = (
+            FrameRecorder(args.video_out, args.video_fps, show_window=args.show_camera)
+            if args.video_out
+            else None
+        )
+        controller_step = controller.step
+
+        if recorder is not None:
+
+            def update_follow_camera(event):
+                inventory = event.metadata.get("inventoryObjects", [])
+                held_pose = event.metadata.get("heldObjectPose", {})
+                focus = held_pose.get("position") if inventory else None
+                camera_position, camera_rotation = rear_camera_pose(
+                    event.metadata["agent"], offset, focus
+                )
+                cameras = event.metadata.get("thirdPartyCameras", [])
+                if cameras:
+                    camera_event = controller_step(
+                        action="UpdateThirdPartyCamera",
+                        thirdPartyCameraId=0,
+                        position=camera_position,
+                        rotation=camera_rotation,
+                    )
+                else:
+                    camera_event = controller_step(
+                        action="AddThirdPartyCamera",
+                        position=camera_position,
+                        rotation=camera_rotation,
+                    )
+                recorder.append(FrameRecorder.frame_from_event(camera_event, "follow"))
+
+            if not args.headless:
+                if args.camera_view == "follow":
+                    update_follow_camera(controller.last_event)
+                else:
+                    recorder.append(FrameRecorder.frame_from_event(controller.last_event, "agent"))
+
+                def recording_step(*step_args, **step_kwargs):
+                    event = controller_step(*step_args, **step_kwargs)
+                    if args.camera_view == "follow":
+                        update_follow_camera(event)
+                    else:
+                        recorder.append(FrameRecorder.frame_from_event(event, "agent"))
+                    return event
+
+                controller.step = recording_step
+
         results = VirtualHomeRunner(
             controller, variables, object_mappings, args.continue_on_error
         ).run(actions)

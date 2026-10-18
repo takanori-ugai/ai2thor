@@ -272,9 +272,7 @@ class KotlinVHMainPort:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     scene_group = parser.add_mutually_exclusive_group()
-    scene_group.add_argument(
-        "--scene", help="iTHOR scene name (defaults to FloorPlan201)"
-    )
+    scene_group.add_argument("--scene", help="iTHOR scene name (defaults to FloorPlan201)")
     scene_group.add_argument(
         "--procthor-split",
         choices=("train", "val", "test"),
