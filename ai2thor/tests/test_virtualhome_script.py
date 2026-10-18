@@ -13,15 +13,15 @@ def test_parse_virtualhome_actions_and_keep_source_lines():
         """# setup
 <char0> [WALK] <wine> ($WINE_ID)
 
-// place the object in the washer
-<char0> [PUTIN] <washingmachine> (365) <wine> ($WINE_ID)
+// put the wine in the washer
+<char0> [PUTIN] <wine> ($WINE_ID) <washingmachine> (365)
 """
     )
 
     assert [action.line_number for action in actions] == [2, 5]
     assert actions[0].verb == "WALK"
     assert actions[0].objects == [("wine", "$WINE_ID")]
-    assert actions[1].objects == [("washingmachine", "365"), ("wine", "$WINE_ID")]
+    assert actions[1].objects == [("wine", "$WINE_ID"), ("washingmachine", "365")]
 
 
 @pytest.mark.parametrize(
@@ -69,7 +69,7 @@ def test_grab_and_putin_map_to_ai2thor_actions():
     runner = VirtualHomeRunner(controller, {"$WINE_ID": "WineBottle|1"}, {}, False)
 
     grab = parse_script("<char0> [GRAB] <wine> ($WINE_ID)")[0]
-    putin = parse_script("<char0> [PUTIN] <washingmachine> (365) <wine> ($WINE_ID)")[0]
+    putin = parse_script("<char0> [PUTIN] <wine> ($WINE_ID) <washingmachine> (365)")[0]
     runner.execute(grab)
     runner.execute(putin)
 
