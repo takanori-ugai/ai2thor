@@ -328,14 +328,16 @@ def main() -> int:
         recorder.append(recorder.frame_from_event(camera_event))
         return camera_event
 
-    update_follow_camera(controller.last_event)
+    if not args.headless:
+        update_follow_camera(controller.last_event)
 
     def recording_step(*step_args, **step_kwargs):
         event = controller_step(*step_args, **step_kwargs)
         update_follow_camera(event)
         return event
 
-    controller.step = recording_step
+    if not args.headless:
+        controller.step = recording_step
     port = KotlinVHMainPort(controller, object_mappings, args.continue_on_error)
     try:
         print("check:", controller.last_event.metadata.get("lastActionSuccess", False))
@@ -358,11 +360,14 @@ def main() -> int:
 
         agent_position = event.metadata["agent"]["position"]
         camera_position, camera_rotation = rear_camera_pose(event.metadata["agent"], offset)
-        port.add_camera_and_save(
-            camera_position,
-            camera_rotation,
-            args.image_out,
-        )
+        if args.headless:
+            print("Headless mode disables image and video capture.")
+        else:
+            port.add_camera_and_save(
+                camera_position,
+                camera_rotation,
+                args.image_out,
+            )
 
         print("renderFinalScript (AI2-THOR supported subset):")
         results = port.run_script(FINAL_SCRIPT)
