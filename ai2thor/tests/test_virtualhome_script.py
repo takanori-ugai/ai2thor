@@ -63,8 +63,16 @@ def test_resolve_virtualhome_type_alias_and_explicit_object_mapping():
 
 def test_grab_and_putin_map_to_ai2thor_actions():
     washer = {"objectId": "Washer|1", "objectType": "WashingMachine", "receptacle": True}
-    wine = {"objectId": "WineBottle|1", "objectType": "WineBottle"}
+    wine = {
+        "objectId": "WineBottle|1",
+        "objectType": "WineBottle",
+        "position": {"x": 0.0, "y": 0.0, "z": 1.0},
+    }
     controller = FakeController([washer, wine])
+    controller.last_event.metadata["agent"] = {
+        "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "rotation": {"y": 0.0},
+    }
     controller.last_event.metadata["inventoryObjects"] = [wine]
     runner = VirtualHomeRunner(controller, {"$WINE_ID": "WineBottle|1"}, {}, False)
 
@@ -82,9 +90,7 @@ def test_grab_and_putin_map_to_ai2thor_actions():
 def test_run_records_failure_and_stops_by_default():
     controller = FakeController([])
     runner = VirtualHomeRunner(controller, {}, {}, False)
-    actions = parse_script(
-        "<char0> [FIND] <unknown> (1)\n<char0> [FIND] <unknown> (2)"
-    )
+    actions = parse_script("<char0> [FIND] <unknown> (1)\n<char0> [FIND] <unknown> (2)")
 
     results = runner.run(actions)
 

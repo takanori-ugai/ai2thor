@@ -34,15 +34,10 @@ def test_environment_graph_maps_nodes_states_properties_and_relations():
 
     graph = environment_graph(metadata)
     nodes_by_object_id = {
-        node["ai2thor_object_id"]: node
-        for node in graph["nodes"]
-        if "ai2thor_object_id" in node
+        node["ai2thor_object_id"]: node for node in graph["nodes"] if "ai2thor_object_id" in node
     }
     id_by_object_id = {key: node["id"] for key, node in nodes_by_object_id.items()}
-    relations = {
-        (edge["from_id"], edge["to_id"], edge["relation_type"])
-        for edge in graph["edges"]
-    }
+    relations = {(edge["from_id"], edge["to_id"], edge["relation_type"]) for edge in graph["edges"]}
 
     assert graph["nodes"][0]["class_name"] == "character"
     assert nodes_by_object_id["Mug|1"]["class_name"] == "mug"
