@@ -4,7 +4,7 @@
 
 「中」以上とした次の VirtualHome アクションを移植対象とする。
 
-- **高**: `WALK`、`GRAB`、`OPEN`、`CLOSE`、`PUTIN`、`PUTON`
+- **高**: `WALK`、`GRAB`、`OPEN`、`CLOSE`、`PUTIN`
 - **中**: `FIND`、`TURNTO`、`LOOKAT_LONG`、`TOUCH`、`PLUGIN`
 
 VirtualHome のアクションスクリプトを入力として受け取り、スクリプト中の各アクションを ai2thor の既存アクションに対応付けて順に実行する仕組みを想定する。入力は、たとえば `"<char0> [GRAB] <wine> ($WINE_ID)"` のような行を並べた形式とする。行ごとの解析に加え、複数行スクリプト、空行、コメント、入力エラーの扱いを定め、各行の実行結果を元の行番号と対応付けて返す。ai2thor には `PickupObject`、`OpenObject`、`CloseObject`、`PutObject`、`GetObjectInFrame`、`GetReachablePositions` などがあるため、まずは Unity 側に個別アクションを新設せず、Python 側にスクリプト解析・変換・実行レイヤーを置く。
@@ -16,14 +16,14 @@ VirtualHome のアクションスクリプトを入力として受け取り、�
 | 1. スクリプト入力と解析 | 全アクション | VirtualHome のアクションスクリプトを複数行入力として受け付ける。各行からキャラクター、動詞、1つ以上のオブジェクト名・ID・変数を抽出し、空行やコメントを扱う。行番号を保持して構文エラーを報告する | 例示された形式の複数行スクリプトを内部表現に変換でき、エラーに行番号を含められる |
 | 2. 変数解決とオブジェクト照合 | `FIND`、他の全アクション | `$WINE_ID` などの変数を実行時に解決し、VirtualHome のクラス名と ai2thor のオブジェクトタイプ／`objectId` を対応付ける。指定 ID がない場合の曖昧一致も扱う | `wine` や `tablelamp` などをシーン内の候補に結び付け、未定義変数・対象なし・曖昧一致を区別できる |
 | 3. スクリプト実行制御 | 全アクション | 解析済みアクションを入力順に実行し、各アクションの成功・失敗を記録する。失敗後に停止するか後続行を続けるかを設定可能にする | スクリプト全体の結果と、各行の実行結果・ai2thor の応答を対応付けて返せる |
-| 4. 直接対応する操作 | `GRAB`、`OPEN`、`CLOSE`、`PUTIN`、`PUTON` | `PickupObject`、`OpenObject`、`CloseObject`、`PutObject` を呼び出す。`PUTIN` は receptacle 内、`PUTON` は表面上への配置として対象と配置条件を選ぶ | 操作結果を VirtualHome アクション単位で返し、保持物や対象の状態を確認できる |
+| 4. 直接対応する操作 | `GRAB`、`OPEN`、`CLOSE`、`PUTIN` | `PickupObject`、`OpenObject`、`CloseObject`、`PutObject` を呼び出す。`PUTIN` は item、destination の順に受け取り、destination が receptacle であることを確認する | 操作結果を VirtualHome アクション単位で返し、保持物や対象の状態を確認できる |
 | 5. 目的地までの移動 | `WALK` | 対象の位置と `GetReachablePositions` を使い、対象に相互作用できる到達位置を選ぶ。既存の移動アクションを組み合わせて移動する | 指定対象の近くまで移動でき、到達不能や経路失敗を返せる |
 | 6. 対象を探す・向く | `FIND`、`TURNTO`、`LOOKAT_LONG` | `FIND` はシーン内メタデータと可視性情報を使って照合する。`TURNTO` は対象の方角へ回転し、`LOOKAT_LONG` は対象が見えるまで向き・視点を調整する | 対象 ID、向き調整の結果、対象が見えない場合の失敗理由を返せる |
 | 7. 接触・照明接続 | `TOUCH`、`PLUGIN` | `TOUCH` は対象への接近と、必要なら対象への基本的な相互作用として定義する。`PLUGIN` はシーンにコンセントと接続可能なランプの対応・接続状態がある場合に実装する | `TOUCH` の意味を一貫して定義できる。`PLUGIN` は接続可能なオブジェクトで接続状態を更新できる |
 
 ## 推奨する実装順
 
-最初にスクリプト入力・解析、変数解決、オブジェクト照合、実行結果の集約を実装し、次に `GRAB`・`OPEN/CLOSE`・`PUTIN/PUTON` を接続する。これらは ai2thor の既存操作に比較的直接対応する。
+最初にスクリプト入力・解析、変数解決、オブジェクト照合、実行結果の集約を実装し、次に `GRAB`・`OPEN/CLOSE`・`PUTIN` を接続する。これらは ai2thor の既存操作に比較的直接対応する。
 
 次に `WALK` を追加する。`MoveAhead` を呼ぶだけでは目的物までの移動にならないため、到達可能位置の選択と移動方策が必要になる。その後 `FIND`、`TURNTO`、`LOOKAT_LONG` を加え、最後に `TOUCH` と `PLUGIN` を扱う。`TOUCH` は VirtualHome で意図する意味を決める必要があり、`PLUGIN` はシーン内の対応オブジェクトと接続状態のモデルに依存する。
 
@@ -39,12 +39,12 @@ VirtualHome のアクションスクリプトを入力として受け取り、�
 
 - 例示されたアクション文字列を解析し、変数 ID を解決できる。
 - 複数行の VirtualHome アクションスクリプトを入力として受け付け、各行を順番に実行し、元の行と結果を対応付けられる。
-- `GRAB`、`OPEN`、`CLOSE`、`PUTIN`、`PUTON` が既存 ai2thor API を通して実行され、結果と失敗理由を取得できる。
+- `GRAB`、`OPEN`、`CLOSE`、`PUTIN` が既存 ai2thor API を通して実行され、結果と失敗理由を取得できる。
 - `WALK` が対象近傍の到達可能位置を選べる。対象が存在しない／到達不能な場合は明示的に失敗する。
 - `FIND`、`TURNTO`、`LOOKAT_LONG`、`TOUCH`、`PLUGIN` の仕様とシーン依存条件が定まり、後続実装の範囲が明確である。
 
 ## 実装状況
 
-実行プログラムを [`scripts/run_virtualhome_script.py`](../scripts/run_virtualhome_script.py) に追加した。複数行入力の解析、変数・VirtualHome ID の対応付け、行ごとの結果記録、停止／継続制御を備える。`WALK` は到達可能位置上で経路を探索し、旋回と前進で移動する。`GRAB`、`OPEN`、`CLOSE`、`PUTIN`、`PUTON` は既存の ai2thor アクションに対応付ける。`FIND`、`TURNTO`、`LOOKAT_LONG`、`TOUCH`、`PLUGIN` も実装し、ai2thor に同等状態モデルがない操作は近似動作として結果に明記するか、実行できない理由を返す。
+実行プログラムを [`scripts/run_virtualhome_script.py`](../scripts/run_virtualhome_script.py) に追加した。複数行入力の解析、変数・VirtualHome ID の対応付け、行ごとの結果記録、停止／継続制御を備える。`WALK` は到達可能位置上で経路を探索し、旋回と前進で移動する。`GRAB`、`OPEN`、`CLOSE`、`PUTIN` は既存の ai2thor アクションに対応付ける。`PUTON` は VirtualHome の衣類着用動作に相当するが、AI2-THOR に衣類・着用状態がないため未対応とする。`FIND`、`TURNTO`、`LOOKAT_LONG`、`TOUCH`、`PLUGIN` も実装し、ai2thor に同等状態モデルがない操作は近似動作として結果に明記するか、実行できない理由を返す。
 
 ヘッドレス実行は `--headless` を指定する。iTHOR の生活シーンは `--scene FloorPlan1` のように選ぶ。VirtualHome の ID は ai2thor の `objectId` と同一とは限らないため、必要に応じて `--object-map 365=OBJECT_ID` で対応を指定する。

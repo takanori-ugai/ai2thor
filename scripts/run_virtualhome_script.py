@@ -20,10 +20,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
 
-ACTION_RE = re.compile(r"^\s*<(?P<agent>[^>]+)>\s+\[(?P<action>[A-Z_]+)\]\s+(?P<args>.+?)\s*$")
+ACTION_RE = re.compile(r"^\s*<(?P<agent>[^>]+)>\s+\[(?P<action>[A-Za-z_]+)\]\s+(?P<args>.+?)\s*$")
 ARG_RE = re.compile(r"<(?P<name>[^>]+)>\s*\((?P<id>[^)]+)\)")
 SUPPORTED = {
-    "WALK", "GRAB", "OPEN", "CLOSE", "PUTIN", "PUTON", "FIND",
+    "WALK", "GRAB", "OPEN", "CLOSE", "PUTIN", "FIND",
     "TURNTO", "LOOKAT_LONG", "TOUCH", "PLUGIN",
 }
 TYPE_ALIASES = {
@@ -55,13 +55,13 @@ def parse_script(source: str) -> List[ScriptAction]:
         match = ACTION_RE.match(line)
         if not match:
             raise ValueError(f"line {line_number}: invalid VirtualHome action syntax: {raw}")
-        verb = match.group("action")
+        verb = match.group("action").upper()
         if verb not in SUPPORTED:
             raise ValueError(f"line {line_number}: unsupported action [{verb}]")
         objects = [(m.group("name"), m.group("id")) for m in ARG_RE.finditer(match.group("args"))]
         if not objects:
             raise ValueError(f"line {line_number}: invalid VirtualHome object argument syntax: {raw}")
-        expected = 2 if verb in {"PUTIN", "PUTON"} else 1
+        expected = 2 if verb == "PUTIN" else 1
         if len(objects) != expected:
             raise ValueError(f"line {line_number}: [{verb}] expects {expected} object argument(s), got {len(objects)}")
         # Reject trailing/unparsed tokens instead of silently executing a partial line.
@@ -88,10 +88,15 @@ class VirtualHomeRunner:
             if identifier not in self.variables:
                 raise RuntimeError(f"undefined variable {identifier}")
             identifier = self.variables[identifier]
-        mapped_id = self.object_mappings.get(identifier)
-        if mapped_id:
-            identifier = mapped_id
         objects = self.controller.last_event.metadata.get("objects", [])
+        if identifier in self.object_mappings:
+            mapped_id = self.object_mappings[identifier]
+            for obj in objects:
+                if obj.get("objectId") == mapped_id:
+                    return obj
+            raise RuntimeError(
+                f"mapped objectId {mapped_id!r} for VirtualHome id {identifier!r} is not in the scene"
+            )
         # Prefer explicit AI2-THOR objectId, then map VirtualHome class names to objectType.
         by_id = [o for o in objects if o.get("objectId") == identifier]
         if by_id:
@@ -200,16 +205,18 @@ class VirtualHomeRunner:
             self.step("PickupObject", objectId=target["objectId"])
         elif verb in ("OPEN", "CLOSE"):
             self.step("OpenObject" if verb == "OPEN" else "CloseObject", objectId=target["objectId"], forceAction=True)
-        elif verb in ("PUTIN", "PUTON"):
-            item = self.resolve(*action.objects[1])
+        elif verb == "PUTIN":
+            destination = self.resolve(*action.objects[1])
+            item = target
+            target = destination
             inventory = self.controller.last_event.metadata.get("inventoryObjects", [])
             if not inventory:
                 raise RuntimeError(f"[{verb}] requires a held object")
             held = inventory[0]
             if held["objectId"] != item["objectId"]:
                 raise RuntimeError(f"held object {held['objectId']} does not match script item {item['objectId']}")
-            if verb == "PUTON" and not target.get("receptacle", False):
-                raise RuntimeError(f"{target['objectType']} is not a placement surface/receptacle")
+            if not target.get("receptacle", False):
+                raise RuntimeError(f"{target['objectType']} is not a receptacle")
             # PutObject.objectId names the destination receptacle; the held item
             # is implicit in AI2-THOR's API.
             self.step("PutObject", objectId=target["objectId"])
@@ -228,7 +235,7 @@ class VirtualHomeRunner:
         elif verb == "PLUGIN":
             # iTHOR residential scenes do not expose a plug/socket relationship.
             # For toggleable lamps, emulate the useful end state (powered on).
-            if "lamp" not in normalize_type(target.get("objectType", "")) and not target.get("toggleable"):
+            if "lamp" not in normalize_type(target.get("objectType", "")) or not target.get("toggleable"):
                 raise RuntimeError("PLUGIN target is not a toggleable lamp; this scene has no plug/socket model")
             if not target.get("isToggled", False):
                 self.step("ToggleObjectOn", objectId=target["objectId"], forceAction=True)
