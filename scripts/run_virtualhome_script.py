@@ -23,8 +23,16 @@ from typing import Dict, List
 ACTION_RE = re.compile(r"^\s*<(?P<agent>[^>]+)>\s+\[(?P<action>[A-Za-z_]+)\]\s+(?P<args>.+?)\s*$")
 ARG_RE = re.compile(r"<(?P<name>[^>]+)>\s*\((?P<id>[^)]+)\)")
 SUPPORTED = {
-    "WALK", "GRAB", "OPEN", "CLOSE", "PUTIN", "FIND",
-    "TURNTO", "LOOKAT_LONG", "TOUCH", "PLUGIN",
+    "WALK",
+    "GRAB",
+    "OPEN",
+    "CLOSE",
+    "PUTIN",
+    "FIND",
+    "TURNTO",
+    "LOOKAT_LONG",
+    "TOUCH",
+    "PLUGIN",
 }
 TYPE_ALIASES = {
     "wine": {"wine", "winebottle"},
@@ -60,10 +68,14 @@ def parse_script(source: str) -> List[ScriptAction]:
             raise ValueError(f"line {line_number}: unsupported action [{verb}]")
         objects = [(m.group("name"), m.group("id")) for m in ARG_RE.finditer(match.group("args"))]
         if not objects:
-            raise ValueError(f"line {line_number}: invalid VirtualHome object argument syntax: {raw}")
+            raise ValueError(
+                f"line {line_number}: invalid VirtualHome object argument syntax: {raw}"
+            )
         expected = 2 if verb == "PUTIN" else 1
         if len(objects) != expected:
-            raise ValueError(f"line {line_number}: [{verb}] expects {expected} object argument(s), got {len(objects)}")
+            raise ValueError(
+                f"line {line_number}: [{verb}] expects {expected} object argument(s), got {len(objects)}"
+            )
         # Reject trailing/unparsed tokens instead of silently executing a partial line.
         residue = ARG_RE.sub("", match.group("args")).strip()
         if residue:
@@ -77,7 +89,13 @@ def normalize_type(name: str) -> str:
 
 
 class VirtualHomeRunner:
-    def __init__(self, controller, variables: Dict[str, str], object_mappings: Dict[str, str], continue_on_error: bool):
+    def __init__(
+        self,
+        controller,
+        variables: Dict[str, str],
+        object_mappings: Dict[str, str],
+        continue_on_error: bool,
+    ):
         self.controller = controller
         self.variables = variables
         self.object_mappings = object_mappings
@@ -126,14 +144,21 @@ class VirtualHomeRunner:
             raise RuntimeError("GetReachablePositions returned no positions")
 
         grid = 0.25
+
         def key(p):
             return (round(p["x"] / grid), round(p["z"] / grid))
 
         by_key = {key(p): p for p in reachable}
         agent_pos = self.controller.last_event.metadata["agent"]["position"]
-        start = min(by_key, key=lambda k: math.hypot(by_key[k]["x"] - agent_pos["x"], by_key[k]["z"] - agent_pos["z"]))
+        start = min(
+            by_key,
+            key=lambda k: math.hypot(
+                by_key[k]["x"] - agent_pos["x"], by_key[k]["z"] - agent_pos["z"]
+            ),
+        )
         goals = {
-            k for k, p in by_key.items()
+            k
+            for k, p in by_key.items()
             if math.hypot(p["x"] - target["x"], p["z"] - target["z"]) <= 0.75
         }
         if not goals:
@@ -178,7 +203,11 @@ class VirtualHomeRunner:
         target = self.resolve(*action.objects[0])
         verb = action.verb
         if verb == "FIND":
-            return {"objectId": target["objectId"], "objectType": target["objectType"], "visible": target.get("visible")}
+            return {
+                "objectId": target["objectId"],
+                "objectType": target["objectType"],
+                "visible": target.get("visible"),
+            }
         if verb == "WALK":
             self.walk_to(target)
         elif verb in ("TURNTO", "LOOKAT_LONG"):
@@ -204,7 +233,11 @@ class VirtualHomeRunner:
                 self.step("RotateRight" if delta > 0 else "RotateLeft", degrees=abs(delta))
             self.step("PickupObject", objectId=target["objectId"])
         elif verb in ("OPEN", "CLOSE"):
-            self.step("OpenObject" if verb == "OPEN" else "CloseObject", objectId=target["objectId"], forceAction=True)
+            self.step(
+                "OpenObject" if verb == "OPEN" else "CloseObject",
+                objectId=target["objectId"],
+                forceAction=True,
+            )
         elif verb == "PUTIN":
             destination = self.resolve(*action.objects[1])
             item = target
@@ -214,7 +247,9 @@ class VirtualHomeRunner:
                 raise RuntimeError(f"[{verb}] requires a held object")
             held = inventory[0]
             if held["objectId"] != item["objectId"]:
-                raise RuntimeError(f"held object {held['objectId']} does not match script item {item['objectId']}")
+                raise RuntimeError(
+                    f"held object {held['objectId']} does not match script item {item['objectId']}"
+                )
             if not target.get("receptacle", False):
                 raise RuntimeError(f"{target['objectType']} is not a receptacle")
             # PutObject.objectId names the destination receptacle; the held item
@@ -231,15 +266,27 @@ class VirtualHomeRunner:
             )
             if target_distance > 1.0:
                 raise RuntimeError(f"target remains out of touch range ({target_distance:.2f}m)")
-            return {"objectId": target["objectId"], "objectType": target["objectType"], "contact": "approximated by close approach"}
+            return {
+                "objectId": target["objectId"],
+                "objectType": target["objectType"],
+                "contact": "approximated by close approach",
+            }
         elif verb == "PLUGIN":
             # iTHOR residential scenes do not expose a plug/socket relationship.
             # For toggleable lamps, emulate the useful end state (powered on).
-            if "lamp" not in normalize_type(target.get("objectType", "")) or not target.get("toggleable"):
-                raise RuntimeError("PLUGIN target is not a toggleable lamp; this scene has no plug/socket model")
+            if "lamp" not in normalize_type(target.get("objectType", "")) or not target.get(
+                "toggleable"
+            ):
+                raise RuntimeError(
+                    "PLUGIN target is not a toggleable lamp; this scene has no plug/socket model"
+                )
             if not target.get("isToggled", False):
                 self.step("ToggleObjectOn", objectId=target["objectId"], forceAction=True)
-            return {"objectId": target["objectId"], "objectType": target["objectType"], "plugin": "emulated by turning lamp on (iTHOR has no outlet connection state)"}
+            return {
+                "objectId": target["objectId"],
+                "objectType": target["objectType"],
+                "plugin": "emulated by turning lamp on (iTHOR has no outlet connection state)",
+            }
         return {"objectId": target["objectId"], "objectType": target["objectType"]}
 
     def run(self, actions: List[ScriptAction]) -> List[dict]:
@@ -264,11 +311,29 @@ class VirtualHomeRunner:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("script", type=Path, help="UTF-8 file with one VirtualHome action per line")
-    parser.add_argument("--scene", default="FloorPlan1", help="iTHOR living scene (e.g. FloorPlan1 through FloorPlan30)")
+    parser.add_argument(
+        "--scene",
+        default="FloorPlan1",
+        help="iTHOR living scene (e.g. FloorPlan1 through FloorPlan30)",
+    )
     parser.add_argument("--headless", action="store_true", help="run Unity without a display")
-    parser.add_argument("--continue-on-error", action="store_true", help="continue after a failed line")
-    parser.add_argument("--variable", action="append", default=[], metavar="NAME=VALUE", help="resolve script variables, e.g. WINE_ID=0")
-    parser.add_argument("--object-map", action="append", default=[], metavar="VH_ID=OBJECT_ID", help="map a VirtualHome numeric ID to an AI2-THOR objectId")
+    parser.add_argument(
+        "--continue-on-error", action="store_true", help="continue after a failed line"
+    )
+    parser.add_argument(
+        "--variable",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="resolve script variables, e.g. WINE_ID=0",
+    )
+    parser.add_argument(
+        "--object-map",
+        action="append",
+        default=[],
+        metavar="VH_ID=OBJECT_ID",
+        help="map a VirtualHome numeric ID to an AI2-THOR objectId",
+    )
     parser.add_argument("--json-out", type=Path, help="write per-line results as JSON")
     args = parser.parse_args()
     try:
@@ -293,11 +358,14 @@ def main() -> int:
 
     controller = ai2thor.controller.Controller(scene=args.scene, headless=args.headless)
     try:
-        results = VirtualHomeRunner(controller, variables, object_mappings, args.continue_on_error).run(actions)
+        results = VirtualHomeRunner(
+            controller, variables, object_mappings, args.continue_on_error
+        ).run(actions)
     finally:
         controller.stop()
     if args.json_out:
         import json
+
         args.json_out.write_text(json.dumps(results, indent=2), encoding="utf-8")
     return 0 if all(r["success"] for r in results) and len(results) == len(actions) else 1
 

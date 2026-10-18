@@ -144,9 +144,13 @@ def environment_graph(event_or_metadata: Any, include_close_edges: bool = True) 
         child_node_id = object_node_ids[child.get("objectId")]
         for parent_id in _as_list(child.get("parentReceptacles")):
             parent_node_id = object_node_ids.get(parent_id)
-            parent = next((obj for obj in ordered_objects if obj.get("objectId") == parent_id), None)
+            parent = next(
+                (obj for obj in ordered_objects if obj.get("objectId") == parent_id), None
+            )
             if parent_node_id is not None and parent is not None:
-                add_edge(child_node_id, parent_node_id, "INSIDE" if parent.get("openable") else "ON")
+                add_edge(
+                    child_node_id, parent_node_id, "INSIDE" if parent.get("openable") else "ON"
+                )
 
     inventory = _as_list(metadata.get("inventoryObjects", []))
     for held in inventory:

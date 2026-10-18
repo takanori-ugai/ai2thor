@@ -71,9 +71,7 @@ class FrameRecorder:
         if self.writer is None:
             self.output_path.parent.mkdir(parents=True, exist_ok=True)
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            self.writer = cv2.VideoWriter(
-                str(self.output_path), fourcc, self.fps, (width, height)
-            )
+            self.writer = cv2.VideoWriter(str(self.output_path), fourcc, self.fps, (width, height))
             if not self.writer.isOpened():
                 raise RuntimeError(f"could not create video file: {self.output_path}")
         self.writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
@@ -173,7 +171,9 @@ class KotlinVHMainPort:
 
     def find_nodes_by_property(self, property_name: str):
         graph = self.controller.get_environment_graph()
-        return [node for node in graph["nodes"] if property_name.upper() in node.get("properties", [])]
+        return [
+            node for node in graph["nodes"] if property_name.upper() in node.get("properties", [])
+        ]
 
     def find_nodes_by_id(self, node_id: int):
         graph = self.controller.get_environment_graph()
@@ -193,9 +193,7 @@ class KotlinVHMainPort:
                 "virtualhome_graph_overlay": True,
             }
         )
-        graph["edges"].append(
-            {"from_id": cat_id, "to_id": sofa_node["id"], "relation_type": "ON"}
-        )
+        graph["edges"].append({"from_id": cat_id, "to_id": sofa_node["id"], "relation_type": "ON"})
         print("AI2-THOR has no scene-graph expansion API; added cat/ON only to a local graph copy.")
         return graph
 
@@ -220,7 +218,11 @@ class KotlinVHMainPort:
         camera_event = event
         if not camera_event.third_party_camera_frames and getattr(event, "events", None):
             camera_event = next(
-                (agent_event for agent_event in event.events if agent_event.third_party_camera_frames),
+                (
+                    agent_event
+                    for agent_event in event.events
+                    if agent_event.third_party_camera_frames
+                ),
                 event.events[0],
             )
         if not camera_event.third_party_camera_frames:
@@ -251,7 +253,9 @@ class KotlinVHMainPort:
             raise RuntimeError("checkScripts requires a sofa in the selected scene")
         self.translate_script(script)  # KotlinVH skipExecution equivalent: parse without dispatch.
         self.add_character(scene)
-        print("Script structure checked; AI2-THOR does not provide KotlinVH renderScript validation.")
+        print(
+            "Script structure checked; AI2-THOR does not provide KotlinVH renderScript validation."
+        )
         return True
 
 
@@ -264,7 +268,9 @@ def main() -> int:
         default=DEFAULT_LINUX64_COMMIT,
         help="AI2-THOR simulator build commit (default: a published Linux64 build)",
     )
-    parser.add_argument("--continue-on-error", action="store_true", help="continue after failed script actions")
+    parser.add_argument(
+        "--continue-on-error", action="store_true", help="continue after failed script actions"
+    )
     parser.add_argument("--object-map", action="append", default=[], metavar="VH_ID=OBJECT_ID")
     parser.add_argument("--image-out", type=Path, default=Path("kotlinvh-camera.png"))
     parser.add_argument("--graph-out", type=Path, default=Path("kotlinvh-environment-graph.json"))
