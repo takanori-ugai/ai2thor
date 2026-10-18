@@ -271,11 +271,28 @@ class VirtualHomeRunner:
         # VirtualHome IDs are scene-local and must not be guessed as AI2-THOR IDs.
         if len(matches) == 1:
             return matches[0]
-        if len(matches) != 1:
-            raise RuntimeError(
-                f"expected one {name!r} object (VirtualHome id {identifier!r}), found {len(matches)}; "
-                "map the VirtualHome ID to an AI2-THOR objectId with --object-map ID=OBJECT_ID"
-            )
+        if len(matches) > 1:
+            agent_position = self.controller.last_event.metadata.get("agent", {}).get("position")
+            positioned_matches = [
+                obj
+                for obj in matches
+                if isinstance(obj.get("position"), dict)
+                and "x" in obj["position"]
+                and "z" in obj["position"]
+            ]
+            if agent_position and positioned_matches:
+                return min(
+                    positioned_matches,
+                    key=lambda obj: math.hypot(
+                        obj["position"]["x"] - agent_position["x"],
+                        obj["position"]["z"] - agent_position["z"],
+                    ),
+                )
+        raise RuntimeError(
+            f"expected at least one {name!r} object (VirtualHome id {identifier!r}), "
+            f"found {len(matches)}; map the VirtualHome ID to an AI2-THOR objectId "
+            "with --object-map ID=OBJECT_ID"
+        )
 
     def step(self, action: str, **kwargs):
         event = self.controller.step(action=action, **kwargs)
