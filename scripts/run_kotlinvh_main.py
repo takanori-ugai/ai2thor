@@ -275,7 +275,9 @@ def main() -> int:
     parser.add_argument("--image-out", type=Path, default=Path("kotlinvh-camera.png"))
     parser.add_argument("--graph-out", type=Path, default=Path("kotlinvh-environment-graph.json"))
     parser.add_argument("--video-out", type=Path, default=Path("kotlinvh-demo.mp4"))
-    parser.add_argument("--video-fps", type=int, default=8, help="output video frame rate")
+    parser.add_argument("--video-fps", type=float, default=8, help="output video frame rate")
+    parser.add_argument("--width", type=int, default=300, help="simulator frame width")
+    parser.add_argument("--height", type=int, default=300, help="simulator frame height")
     parser.add_argument(
         "--camera-position",
         default="0.5,1.4,1.2",
@@ -305,6 +307,8 @@ def main() -> int:
         commit_id=args.commit_id,
         renderInstanceSegmentation=False,
         platform=ai2thor.platform.Linux64,
+        width=args.width,
+        height=args.height,
     )
     recorder = FrameRecorder(args.video_out, args.video_fps)
     controller_step = controller.step

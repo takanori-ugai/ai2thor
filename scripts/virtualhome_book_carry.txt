@@ -1,0 +1,4 @@
+# Walk to the book, pick it up, and carry it to the desk lamp.
+<char0> [WALK] <book> (93)
+<char0> [GRAB] <book> (93)
+<char0> [WALK] <tablelamp> (76)
