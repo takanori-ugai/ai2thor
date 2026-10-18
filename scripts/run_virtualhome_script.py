@@ -20,6 +20,153 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
 
+
+class FrameRecorder:
+    """Write captured AI2-THOR RGB frames to an MP4 file."""
+
+    def __init__(self, output_path: Path, fps: float, show_window: bool = False):
+        self.output_path = output_path
+        self.fps = fps
+        self.preview = X11Preview() if show_window else None
+        self.writer = None
+        self.frame_count = 0
+
+    def append(self, frame):
+        if frame is None:
+            return
+        import cv2
+
+        height, width = frame.shape[:2]
+        if self.writer is None:
+            self.output_path.parent.mkdir(parents=True, exist_ok=True)
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            self.writer = cv2.VideoWriter(str(self.output_path), fourcc, self.fps, (width, height))
+            if not self.writer.isOpened():
+                raise RuntimeError(f"could not create video file: {self.output_path}")
+        bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        self.writer.write(bgr_frame)
+        if self.preview is not None:
+            self.preview.show(frame)
+        self.frame_count += 1
+
+    @staticmethod
+    def frame_from_event(event, camera_view="follow"):
+        events = getattr(event, "events", [])
+        active_agent = event.metadata.get("activeAgentId", 0)
+        ordered_events = []
+        if events and 0 <= active_agent < len(events):
+            ordered_events.append(events[active_agent])
+        ordered_events.extend(item for item in events if item not in ordered_events)
+        if not ordered_events:
+            ordered_events = [event]
+        if camera_view == "agent":
+            for item in ordered_events:
+                frame = getattr(item, "frame", None)
+                if frame is not None:
+                    return frame
+        else:
+            for item in ordered_events:
+                frames = getattr(item, "third_party_camera_frames", [])
+                if frames:
+                    return frames[0]
+            for item in ordered_events:
+                frame = getattr(item, "frame", None)
+                if frame is not None:
+                    return frame
+        return None
+
+    def close(self):
+        if self.preview is not None:
+            self.preview.close()
+        if self.writer is not None:
+            self.writer.release()
+            print(f"Saved video with {self.frame_count} frames to {self.output_path}")
+
+
+class X11Preview:
+    """Display live camera frames in an X11 window when OpenCV has no GUI support."""
+
+    def __init__(self):
+        from Xlib import X, display
+
+        self.X = X
+        self.display = display.Display()
+        screen = self.display.screen()
+        self.width, self.height = 512, 384
+        self.depth = screen.root_depth
+        self.window = screen.root.create_window(
+            0,
+            0,
+            self.width,
+            self.height,
+            0,
+            self.depth,
+            X.InputOutput,
+            X.CopyFromParent,
+            background_pixel=screen.black_pixel,
+        )
+        self.window.set_wm_name("AI2-THOR Follow Camera")
+        self.window.set_wm_class("AI2ThorFollow", "AI2ThorFollow")
+        self.window.map()
+        self.gc = self.window.create_gc()
+        self.display.flush()
+
+    def show(self, frame):
+        from PIL import Image
+
+        image = Image.fromarray(frame).convert("RGB").resize((self.width, self.height))
+        data = image.tobytes("raw", "BGRX")
+        rows_per_request = 64
+        bytes_per_row = self.width * 4
+        for y in range(0, self.height, rows_per_request):
+            row_count = min(rows_per_request, self.height - y)
+            start = y * bytes_per_row
+            end = (y + row_count) * bytes_per_row
+            self.window.put_image(
+                self.gc,
+                0,
+                y,
+                self.width,
+                row_count,
+                self.X.ZPixmap,
+                self.depth,
+                0,
+                data[start:end],
+            )
+        self.display.flush()
+
+    def close(self):
+        self.window.destroy()
+        self.display.close()
+
+
+def rear_camera_pose(agent: dict, offset: List[float], target: dict | None = None):
+    position = agent["position"]
+    yaw = math.radians(agent["rotation"]["y"])
+    right_x, right_z = math.cos(yaw), -math.sin(yaw)
+    forward_x, forward_z = math.sin(yaw), math.cos(yaw)
+    side, height, behind = offset
+    target = target or {
+        "x": position["x"],
+        "y": position["y"] + 0.6,
+        "z": position["z"],
+    }
+    camera_position = {
+        "x": target["x"] + side * right_x - behind * forward_x,
+        "y": target["y"] + height,
+        "z": target["z"] + side * right_z - behind * forward_z,
+    }
+    dx = target["x"] - camera_position["x"]
+    dy = target["y"] - camera_position["y"]
+    dz = target["z"] - camera_position["z"]
+    horizontal = math.hypot(dx, dz)
+    return camera_position, {
+        "x": math.degrees(math.atan2(-dy, horizontal)),
+        "y": math.degrees(math.atan2(dx, dz)) % 360,
+        "z": 0,
+    }
+
+
 ACTION_RE = re.compile(r"^\s*<(?P<agent>[^>]+)>\s+\[(?P<action>[A-Za-z_]+)\]\s+(?P<args>.+?)\s*$")
 ARG_RE = re.compile(r"<(?P<name>[^>]+)>\s*\((?P<id>[^)]+)\)")
 SUPPORTED = {
@@ -318,6 +465,11 @@ def main() -> int:
     )
     parser.add_argument("--headless", action="store_true", help="run Unity without a display")
     parser.add_argument(
+        "--commit-id",
+        default="f0825767cd50d69f666c7f282e54abfe58f1e917",
+        help="AI2-THOR simulator build commit",
+    )
+    parser.add_argument(
         "--continue-on-error", action="store_true", help="continue after a failed line"
     )
     parser.add_argument(
@@ -335,6 +487,26 @@ def main() -> int:
         help="map a VirtualHome numeric ID to an AI2-THOR objectId",
     )
     parser.add_argument("--json-out", type=Path, help="write per-line results as JSON")
+    parser.add_argument("--video-out", type=Path, help="record an MP4 video")
+    parser.add_argument("--video-fps", type=float, default=66.666, help="output video frame rate")
+    parser.add_argument(
+        "--camera-view",
+        choices=("agent", "follow"),
+        default="agent",
+        help="record the simulator agent view or the added follow camera",
+    )
+    parser.add_argument(
+        "--show-camera",
+        action="store_true",
+        help="show the selected camera in a live preview window while recording",
+    )
+    parser.add_argument("--width", type=int, default=1024, help="simulator frame width")
+    parser.add_argument("--height", type=int, default=768, help="simulator frame height")
+    parser.add_argument(
+        "--camera-position",
+        default="-0.45,0.25,0.45",
+        help="follow camera offset as right,up,behind meters (from held item when carrying)",
+    )
     args = parser.parse_args()
     try:
         actions = parse_script(args.script.read_text(encoding="utf-8"))
@@ -354,15 +526,80 @@ def main() -> int:
         vh_id, thor_id = item.split("=", 1)
         object_mappings[vh_id] = thor_id
 
-    import ai2thor.controller
+    try:
+        offset = [float(value) for value in args.camera_position.split(",")]
+        if len(offset) != 3:
+            raise ValueError("expected x,y,z")
+    except ValueError as exc:
+        parser.error(f"invalid --camera-position: {exc}")
 
-    controller = ai2thor.controller.Controller(scene=args.scene, headless=args.headless)
+    import ai2thor.controller
+    import ai2thor.platform
+
+    controller = ai2thor.controller.Controller(
+        scene=args.scene,
+        headless=args.headless,
+        width=args.width,
+        height=args.height,
+        commit_id=args.commit_id,
+        platform=ai2thor.platform.Linux64,
+    )
+    recorder = (
+        FrameRecorder(args.video_out, args.video_fps, show_window=args.show_camera)
+        if args.video_out
+        else None
+    )
+    controller_step = controller.step
+
+    if recorder is not None:
+        def update_follow_camera(event):
+            inventory = event.metadata.get("inventoryObjects", [])
+            held_pose = event.metadata.get("heldObjectPose", {})
+            focus = held_pose.get("position") if inventory else None
+            camera_position, camera_rotation = rear_camera_pose(
+                event.metadata["agent"], offset, focus
+            )
+            cameras = event.metadata.get("thirdPartyCameras", [])
+            if cameras:
+                camera_event = controller_step(
+                    action="UpdateThirdPartyCamera",
+                    thirdPartyCameraId=0,
+                    position=camera_position,
+                    rotation=camera_rotation,
+                )
+            else:
+                camera_event = controller_step(
+                    action="AddThirdPartyCamera",
+                    position=camera_position,
+                    rotation=camera_rotation,
+                )
+            recorder.append(FrameRecorder.frame_from_event(camera_event, "follow"))
+
+        if not args.headless:
+            if args.camera_view == "follow":
+                update_follow_camera(controller.last_event)
+            else:
+                recorder.append(
+                    FrameRecorder.frame_from_event(controller.last_event, "agent")
+                )
+
+            def recording_step(*step_args, **step_kwargs):
+                event = controller_step(*step_args, **step_kwargs)
+                if args.camera_view == "follow":
+                    update_follow_camera(event)
+                else:
+                    recorder.append(FrameRecorder.frame_from_event(event, "agent"))
+                return event
+
+            controller.step = recording_step
     try:
         results = VirtualHomeRunner(
             controller, variables, object_mappings, args.continue_on_error
         ).run(actions)
     finally:
         controller.stop()
+        if recorder is not None:
+            recorder.close()
     if args.json_out:
         import json
 
