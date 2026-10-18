@@ -190,6 +190,13 @@ class VirtualHomeRunner:
             ):
                 raise RuntimeError("target is not visible after turning toward it")
         elif verb == "GRAB":
+            agent = self.controller.last_event.metadata["agent"]
+            p, q = agent["position"], target["position"]
+            yaw = math.degrees(math.atan2(q["x"] - p["x"], q["z"] - p["z"])) % 360
+            current_yaw = agent["rotation"]["y"]
+            delta = (yaw - current_yaw + 180) % 360 - 180
+            if abs(delta) > 1:
+                self.step("RotateRight" if delta > 0 else "RotateLeft", degrees=abs(delta))
             self.step("PickupObject", objectId=target["objectId"])
         elif verb in ("OPEN", "CLOSE"):
             self.step("OpenObject" if verb == "OPEN" else "CloseObject", objectId=target["objectId"], forceAction=True)
