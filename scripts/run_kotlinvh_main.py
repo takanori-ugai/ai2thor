@@ -22,11 +22,21 @@ from pathlib import Path
 from typing import Dict, Iterable, List
 
 try:
-    from scripts.run_virtualhome_script import ScriptAction, VirtualHomeRunner, parse_script
+    from scripts.run_virtualhome_script import (
+        ScriptAction,
+        VirtualHomeRunner,
+        load_procthor_house,
+        parse_script,
+    )
 except ModuleNotFoundError:
     # When run as `python scripts/run_kotlinvh_main.py`, Python puts the
     # scripts directory, rather than the repository root, on sys.path.
-    from run_virtualhome_script import ScriptAction, VirtualHomeRunner, parse_script
+    from run_virtualhome_script import (
+        ScriptAction,
+        VirtualHomeRunner,
+        load_procthor_house,
+        parse_script,
+    )
 
 
 SCRIPT0 = [
@@ -138,7 +148,7 @@ class KotlinVHMainPort:
         self.continue_on_error = continue_on_error
         self.runner = VirtualHomeRunner(controller, {}, object_mappings, continue_on_error)
 
-    def reset(self, scene: str, agent_count: int = 1):
+    def reset(self, scene, agent_count: int = 1):
         self.controller.reset(scene=scene, agentCount=agent_count)
         event = self.controller.last_event
         if not event.metadata.get("lastActionSuccess", True):
@@ -197,7 +207,7 @@ class KotlinVHMainPort:
         print("AI2-THOR has no scene-graph expansion API; added cat/ON only to a local graph copy.")
         return graph
 
-    def add_character(self, scene: str):
+    def add_character(self, scene):
         # The primary character exists at initialization. A second agent is the
         # closest AI2-THOR equivalent to KotlinVH's addCharacter request.
         event = self.reset(scene, agent_count=2)
@@ -234,7 +244,7 @@ class KotlinVHMainPort:
         print(f"Saved camera image to {output_path}")
         return event
 
-    def test_scripts(self, scene: str, script: Iterable[str]):
+    def test_scripts(self, scene, script: Iterable[str]):
         self.reset(scene)
         graph = self.controller.get_environment_graph()
         sofas = [node for node in graph["nodes"] if node.get("class_name") == "sofa"]
@@ -245,7 +255,7 @@ class KotlinVHMainPort:
         self.add_character(scene)
         return self.run_script(script)
 
-    def check_scripts(self, scene: str, script: Iterable[str]):
+    def check_scripts(self, scene, script: Iterable[str]):
         self.reset(scene)
         graph = self.controller.get_environment_graph()
         sofas = [node for node in graph["nodes"] if node.get("class_name") == "sofa"]
@@ -261,7 +271,21 @@ class KotlinVHMainPort:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scene", default="FloorPlan201", help="iTHOR living-room scene")
+    scene_group = parser.add_mutually_exclusive_group()
+    scene_group.add_argument(
+        "--scene", help="iTHOR scene name (defaults to FloorPlan201)"
+    )
+    scene_group.add_argument(
+        "--procthor-split",
+        choices=("train", "val", "test"),
+        help="load a house from the ProcTHOR-10K split (requires: pip install prior)",
+    )
+    parser.add_argument(
+        "--procthor-index",
+        type=int,
+        default=0,
+        help="zero-based house index within --procthor-split (default: 0)",
+    )
     parser.add_argument("--headless", action="store_true", help="run Unity without a display")
     parser.add_argument(
         "--commit-id",
@@ -284,6 +308,8 @@ def main() -> int:
         help="rear camera offset from agent as right,up,behind meters",
     )
     args = parser.parse_args()
+    if args.procthor_split is None and args.procthor_index != 0:
+        parser.error("--procthor-index requires --procthor-split")
 
     object_mappings = {}
     for item in args.object_map:
@@ -301,8 +327,16 @@ def main() -> int:
 
     import ai2thor.controller
 
+    scene = args.scene or "FloorPlan201"
+    if args.procthor_split is not None:
+        try:
+            scene = load_procthor_house(args.procthor_split, args.procthor_index)
+        except (RuntimeError, TypeError, ValueError) as exc:
+            parser.error(str(exc))
+        print(f"Loaded ProcTHOR-10K {args.procthor_split}[{args.procthor_index}]")
+
     controller = ai2thor.controller.Controller(
-        scene=args.scene,
+        scene=scene,
         headless=args.headless,
         commit_id=args.commit_id,
         renderInstanceSegmentation=False,
@@ -346,17 +380,17 @@ def main() -> int:
     try:
         print("check:", controller.last_event.metadata.get("lastActionSuccess", False))
         print("testScripts:")
-        port.test_scripts(args.scene, SCRIPT0)
+        port.test_scripts(scene, SCRIPT0)
 
         # Main.kt's helper methods each reset the simulator before querying it.
-        port.reset(args.scene)
+        port.reset(scene)
         print("findNodes(tv):", port.find_nodes("tv"))
-        port.reset(args.scene)
+        port.reset(scene)
         print("findNodesByProperty(HAS_PLUG):", port.find_nodes_by_property("HAS_PLUG"))
-        port.reset(args.scene)
+        port.reset(scene)
         print("findNodesById(1):", port.find_nodes_by_id(1))
 
-        event = port.reset(args.scene, agent_count=2)
+        event = port.reset(scene, agent_count=2)
         graph = controller.get_environment_graph(event)
         args.graph_out.parent.mkdir(parents=True, exist_ok=True)
         args.graph_out.write_text(json.dumps(graph, indent=2), encoding="utf-8")

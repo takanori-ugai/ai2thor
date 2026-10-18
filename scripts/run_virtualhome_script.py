@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Execute a small VirtualHome-style action script in an AI2-THOR scene.
 
-Example:
+Examples:
   python scripts/run_virtualhome_script.py script.txt --scene FloorPlan1 --headless
+  python scripts/run_virtualhome_script.py script.txt --procthor-split train --procthor-index 0
 
 This is an integration harness for the actions listed in
 doc/virtualhome-action-porting-plan.md. VirtualHome object IDs are resolved by
@@ -233,6 +234,42 @@ def parse_script(source: str) -> List[ScriptAction]:
 
 def normalize_type(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def load_procthor_house(split: str, index: int) -> dict:
+    """Load one ProcTHOR-10K house specification using the optional ``prior`` package."""
+    try:
+        import prior
+    except ImportError as exc:
+        raise RuntimeError(
+            "ProcTHOR-10K requires the optional 'prior' package; install it with "
+            "'$HOME/venv/bin/pip install prior'"
+        ) from exc
+
+    try:
+        dataset = prior.load_dataset("procthor-10k")
+        houses = dataset[split]
+    except Exception as exc:
+        raise RuntimeError(
+            f"could not load ProcTHOR-10K split {split!r}: {exc}"
+        ) from exc
+
+    if index < 0 or index >= len(houses):
+        raise ValueError(
+            f"ProcTHOR-10K {split!r} index must be between 0 and {len(houses) - 1}; "
+            f"got {index}"
+        )
+    house = houses[index]
+    # Some prior versions expose a House object, while the dataset's current
+    # LazyJsonDataset returns the serialized house specification as a dict.
+    if not isinstance(house, dict) and isinstance(getattr(house, "data", None), dict):
+        house = house.data
+    if not isinstance(house, dict):
+        raise TypeError(
+            f"ProcTHOR-10K returned {type(house).__name__} for {split}[{index}], "
+            "expected a house specification dictionary"
+        )
+    return house
 
 
 class VirtualHomeRunner:
@@ -478,10 +515,21 @@ class VirtualHomeRunner:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("script", type=Path, help="UTF-8 file with one VirtualHome action per line")
-    parser.add_argument(
+    scene_group = parser.add_mutually_exclusive_group()
+    scene_group.add_argument(
         "--scene",
-        default="FloorPlan1",
-        help="iTHOR living scene (e.g. FloorPlan1 through FloorPlan30)",
+        help="iTHOR scene name (e.g. FloorPlan1 or FloorPlan201); defaults to FloorPlan1",
+    )
+    scene_group.add_argument(
+        "--procthor-split",
+        choices=("train", "val", "test"),
+        help="load a house from the ProcTHOR-10K split (requires: pip install prior)",
+    )
+    parser.add_argument(
+        "--procthor-index",
+        type=int,
+        default=0,
+        help="zero-based house index within --procthor-split (default: 0)",
     )
     parser.add_argument("--headless", action="store_true", help="run Unity without a display")
     parser.add_argument(
@@ -528,6 +576,8 @@ def main() -> int:
         help="follow camera offset as right,up,behind meters (from held item when carrying)",
     )
     args = parser.parse_args()
+    if args.procthor_split is None and args.procthor_index != 0:
+        parser.error("--procthor-index requires --procthor-split")
     try:
         actions = parse_script(args.script.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -556,8 +606,18 @@ def main() -> int:
     import ai2thor.controller
     import ai2thor.platform
 
+    scene = args.scene or "FloorPlan1"
+    if args.procthor_split is not None:
+        try:
+            scene = load_procthor_house(args.procthor_split, args.procthor_index)
+        except (RuntimeError, TypeError, ValueError) as exc:
+            parser.error(str(exc))
+        print(
+            f"Loaded ProcTHOR-10K {args.procthor_split}[{args.procthor_index}]"
+        )
+
     controller = ai2thor.controller.Controller(
-        scene=args.scene,
+        scene=scene,
         headless=args.headless,
         width=args.width,
         height=args.height,
