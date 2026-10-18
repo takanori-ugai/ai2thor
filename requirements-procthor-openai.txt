@@ -1,0 +1,4 @@
+# Optional dependencies for scripts/query_procthor_object.py
+-r requirements.txt
+prior
+openai
