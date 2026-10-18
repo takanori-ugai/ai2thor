@@ -38,7 +38,7 @@ def _node_states(obj: Mapping[str, Any]) -> List[str]:
         states.append("OPEN" if obj.get("isOpen") else "CLOSED")
     if obj.get("toggleable"):
         states.append("ON" if obj.get("isToggled") else "OFF")
-    if obj.get("dirtyable") or "isDirty" in obj:
+    if obj.get("dirtyable"):
         states.append("DIRTY" if obj.get("isDirty") else "CLEAN")
     if obj.get("isCooked"):
         states.append("COOKED")
@@ -163,7 +163,15 @@ def environment_graph(event_or_metadata: Any, include_close_edges: bool = True) 
         for index, obj1 in enumerate(ordered_objects):
             node1 = object_node_ids[obj1.get("objectId")]
             for obj2 in ordered_objects[index + 1 :]:
-                distance = _object_distance_to_bounds(obj1, obj2)
+                distances = [
+                    distance
+                    for distance in (
+                        _object_distance_to_bounds(obj1, obj2),
+                        _object_distance_to_bounds(obj2, obj1),
+                    )
+                    if distance is not None
+                ]
+                distance = min(distances) if distances else None
                 if distance is not None and distance < 1.5:
                     node2 = object_node_ids[obj2.get("objectId")]
                     add_edge(node1, node2, "CLOSE")
