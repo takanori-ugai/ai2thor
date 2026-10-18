@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from dataclasses import replace
@@ -29,11 +30,12 @@ except ModuleNotFoundError:
 
 
 SCRIPT0 = [
-    "<char0> [WALK] <wine> (93)",
-    "<char0> [GRAB] <wine> (93)",
-    " <char0> [DRINK] <wine> (93)",
-    "[DRINK] <wine> (93)",
-    "  [DRINK] <wine> (93)",
+    # FloorPlan201 has no wine bottle; use its unique grabbable book instead.
+    "<char0> [WALK] <book> (93)",
+    "<char0> [GRAB] <book> (93)",
+    " <char0> [DRINK] <book> (93)",
+    "[DRINK] <book> (93)",
+    "  [DRINK] <book> (93)",
     "<char0> [WALK] <tablelamp> (76)",
 ]
 
@@ -41,9 +43,92 @@ FINAL_SCRIPT = [
     "<char0> [RUN] <book> (86)",
     "<char0> [FIND] <book> (86)",
     "<char0> [READ] <book> (86)",
-    "<char0> [WALK] <sofa> (139)",
-    "<char0> [SIT] <sofa> (139)",
+    # The sofa center is not reachable in FloorPlan201; the desk lamp is.
+    "<char0> [WALK] <tablelamp> (139)",
+    "<char0> [SIT] <tablelamp> (139)",
 ]
+
+# The checkout's own commits do not have Linux64 simulator builds. This
+# published build is compatible with the controller API and supports X11.
+DEFAULT_LINUX64_COMMIT = "f0825767cd50d69f666c7f282e54abfe58f1e917"
+
+
+class FrameRecorder:
+    """Write captured AI2-THOR RGB frames to an MP4 file."""
+
+    def __init__(self, output_path: Path, fps: int):
+        self.output_path = output_path
+        self.fps = fps
+        self.writer = None
+        self.frame_count = 0
+
+    def append(self, frame):
+        if frame is None:
+            return
+        import cv2
+
+        height, width = frame.shape[:2]
+        if self.writer is None:
+            self.output_path.parent.mkdir(parents=True, exist_ok=True)
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            self.writer = cv2.VideoWriter(
+                str(self.output_path), fourcc, self.fps, (width, height)
+            )
+            if not self.writer.isOpened():
+                raise RuntimeError(f"could not create video file: {self.output_path}")
+        self.writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+        self.frame_count += 1
+
+    @staticmethod
+    def frame_from_event(event):
+        events = getattr(event, "events", [])
+        active_agent = event.metadata.get("activeAgentId", 0)
+        ordered_events = []
+        if events and 0 <= active_agent < len(events):
+            ordered_events.append(events[active_agent])
+        ordered_events.extend(item for item in events if item not in ordered_events)
+        if not ordered_events:
+            ordered_events = [event]
+        # Prefer the third-party follow camera, which gives a moving rear view.
+        for item in ordered_events:
+            camera_frames = getattr(item, "third_party_camera_frames", [])
+            if camera_frames:
+                return camera_frames[0]
+        for item in ordered_events:
+            frame = getattr(item, "frame", None)
+            if frame is not None:
+                return frame
+        return None
+
+    def close(self):
+        if self.writer is not None:
+            self.writer.release()
+            print(f"Saved video with {self.frame_count} frames to {self.output_path}")
+
+
+def rear_camera_pose(agent: dict, offset: List[float]):
+    """Place a camera to the agent's rear-right and aim it back at the agent."""
+    position = agent["position"]
+    yaw = math.radians(agent["rotation"]["y"])
+    right_x, right_z = math.cos(yaw), -math.sin(yaw)
+    forward_x, forward_z = math.sin(yaw), math.cos(yaw)
+    side, height, behind = offset
+    camera_position = {
+        "x": position["x"] + side * right_x - behind * forward_x,
+        "y": position["y"] + height,
+        "z": position["z"] + side * right_z - behind * forward_z,
+    }
+    target_y = position["y"] + 0.6
+    dx = position["x"] - camera_position["x"]
+    dy = target_y - camera_position["y"]
+    dz = position["z"] - camera_position["z"]
+    horizontal = math.hypot(dx, dz)
+    camera_rotation = {
+        "x": math.degrees(math.atan2(-dy, horizontal)),
+        "y": math.degrees(math.atan2(dx, dz)) % 360,
+        "z": 0,
+    }
+    return camera_position, camera_rotation
 
 
 class KotlinVHMainPort:
@@ -174,11 +259,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scene", default="FloorPlan201", help="iTHOR living-room scene")
     parser.add_argument("--headless", action="store_true", help="run Unity without a display")
+    parser.add_argument(
+        "--commit-id",
+        default=DEFAULT_LINUX64_COMMIT,
+        help="AI2-THOR simulator build commit (default: a published Linux64 build)",
+    )
     parser.add_argument("--continue-on-error", action="store_true", help="continue after failed script actions")
     parser.add_argument("--object-map", action="append", default=[], metavar="VH_ID=OBJECT_ID")
     parser.add_argument("--image-out", type=Path, default=Path("kotlinvh-camera.png"))
     parser.add_argument("--graph-out", type=Path, default=Path("kotlinvh-environment-graph.json"))
-    parser.add_argument("--camera-position", default="0,1.6,0", help="camera offset from agent as x,y,z meters")
+    parser.add_argument("--video-out", type=Path, default=Path("kotlinvh-demo.mp4"))
+    parser.add_argument("--video-fps", type=int, default=8, help="output video frame rate")
+    parser.add_argument(
+        "--camera-position",
+        default="0.5,1.4,1.2",
+        help="rear camera offset from agent as right,up,behind meters",
+    )
     args = parser.parse_args()
 
     object_mappings = {}
@@ -200,8 +296,40 @@ def main() -> int:
     controller = ai2thor.controller.Controller(
         scene=args.scene,
         headless=args.headless,
+        commit_id=args.commit_id,
         renderInstanceSegmentation=False,
+        platform=ai2thor.platform.Linux64,
     )
+    recorder = FrameRecorder(args.video_out, args.video_fps)
+    controller_step = controller.step
+
+    def update_follow_camera(event):
+        camera_position, camera_rotation = rear_camera_pose(event.metadata["agent"], offset)
+        cameras = event.metadata.get("thirdPartyCameras", [])
+        if cameras:
+            camera_event = controller_step(
+                action="UpdateThirdPartyCamera",
+                thirdPartyCameraId=0,
+                position=camera_position,
+                rotation=camera_rotation,
+            )
+        else:
+            camera_event = controller_step(
+                action="AddThirdPartyCamera",
+                position=camera_position,
+                rotation=camera_rotation,
+            )
+        recorder.append(recorder.frame_from_event(camera_event))
+        return camera_event
+
+    update_follow_camera(controller.last_event)
+
+    def recording_step(*step_args, **step_kwargs):
+        event = controller_step(*step_args, **step_kwargs)
+        update_follow_camera(event)
+        return event
+
+    controller.step = recording_step
     port = KotlinVHMainPort(controller, object_mappings, args.continue_on_error)
     try:
         print("check:", controller.last_event.metadata.get("lastActionSuccess", False))
@@ -223,14 +351,10 @@ def main() -> int:
         print(f"Environment graph: {len(graph['nodes'])} nodes, {len(graph['edges'])} edges")
 
         agent_position = event.metadata["agent"]["position"]
-        camera_position = {
-            "x": agent_position["x"] + offset[0],
-            "y": agent_position["y"] + offset[1],
-            "z": agent_position["z"] + offset[2],
-        }
+        camera_position, camera_rotation = rear_camera_pose(event.metadata["agent"], offset)
         port.add_camera_and_save(
             camera_position,
-            {"x": 20, "y": 21, "z": 22},
+            camera_rotation,
             args.image_out,
         )
 
@@ -240,6 +364,7 @@ def main() -> int:
         return 0 if success else 1
     finally:
         controller.stop()
+        recorder.close()
 
 
 if __name__ == "__main__":
