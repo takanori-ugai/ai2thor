@@ -262,8 +262,11 @@ class VirtualHomeRunner:
             raise RuntimeError(
                 f"mapped objectId {mapped_id!r} for VirtualHome id {identifier!r} is not in the scene"
             )
-        # Prefer explicit AI2-THOR objectId, then map VirtualHome class names to objectType.
-        by_id = [o for o in objects if o.get("objectId") == identifier]
+        # VirtualHome may use 0 as an unresolved ID; resolve it from the class name.
+        # Otherwise prefer an explicit AI2-THOR objectId before matching objectType.
+        by_id = [] if identifier == "0" else [
+            o for o in objects if o.get("objectId") == identifier
+        ]
         if by_id:
             return by_id[0]
         accepted_types = TYPE_ALIASES.get(normalize_type(name), {normalize_type(name)})
